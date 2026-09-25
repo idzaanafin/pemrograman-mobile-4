@@ -6,6 +6,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.os.Bundle;
+import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -15,8 +16,8 @@ import com.google.android.material.textfield.TextInputLayout;
 
 public class MainActivity extends AppCompatActivity {
 
-    private EditText nrp, nama, jurusan, fakultas, noHp;
-    private TextInputLayout layoutNrp, layoutNama, layoutJurusan, layoutFakultas, layoutNoHp;
+    private EditText edtSearchNrp, nrp, nama, jurusan, fakultas, noHp;
+    private TextInputLayout layoutSearchNrp, layoutNrp, layoutNama, layoutJurusan, layoutFakultas, layoutNoHp;
     private SQLiteDatabase dbku;
     private SQLiteOpenHelper openDb;
 
@@ -25,7 +26,11 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Binding View Elements
+        // Binding View Elements Pencarian
+        edtSearchNrp = findViewById(R.id.edtSearchNrp);
+        layoutSearchNrp = findViewById(R.id.layoutSearchNrp);
+
+        // Binding View Elements Form
         nrp = findViewById(R.id.nrp);
         nama = findViewById(R.id.nama);
         jurusan = findViewById(R.id.jurusan);
@@ -38,12 +43,20 @@ public class MainActivity extends AppCompatActivity {
         layoutFakultas = findViewById(R.id.layoutFakultas);
         layoutNoHp = findViewById(R.id.layoutNoHp);
 
-        // Button Click Listeners
+        // Button Click Listeners & IME Search Action
+        findViewById(R.id.btnSearch).setOnClickListener(v -> cari());
         findViewById(R.id.btnSimpan).setOnClickListener(v -> simpan());
-        findViewById(R.id.btnCari).setOnClickListener(v -> cari());
         findViewById(R.id.btnUpdate).setOnClickListener(v -> update());
         findViewById(R.id.btnHapus).setOnClickListener(v -> hapus());
         findViewById(R.id.btnClear).setOnClickListener(v -> clearForm());
+
+        edtSearchNrp.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                cari();
+                return true;
+            }
+            return false;
+        });
 
         // Inisialisasi SQLiteOpenHelper
         openDb = new SQLiteOpenHelper(this, "db_mahasiswa", null, 2) {
@@ -84,11 +97,11 @@ public class MainActivity extends AppCompatActivity {
             dbku.execSQL("ALTER TABLE mhs ADD COLUMN no_hp TEXT;");
         } catch (Exception ignored) {}
 
-        // Memuat NRP terakhir yang dicari dari SharedPreferences
+        // Memuat NRP terakhir yang dicari dari SharedPreferences saat aplikasi dibuka
         SharedPreferences sp = getSharedPreferences("pref_mhs", MODE_PRIVATE);
         String lastNrp = sp.getString("last_nrp", "");
         if (!lastNrp.isEmpty()) {
-            nrp.setText(lastNrp);
+            edtSearchNrp.setText(lastNrp);
             cari();
         }
     }
@@ -101,22 +114,22 @@ public class MainActivity extends AppCompatActivity {
         super.onStop();
     }
 
-    private boolean validateNrp() {
-        String strNrp = nrp.getText().toString().trim();
+    private boolean validateNrp(EditText editText, TextInputLayout inputLayout) {
+        String strNrp = editText.getText().toString().trim();
         if (strNrp.isEmpty()) {
-            layoutNrp.setError("NRP tidak boleh kosong!");
+            inputLayout.setError("NRP tidak boleh kosong!");
             return false;
         } else if (strNrp.length() != 10 || !strNrp.matches("\\d{10}")) {
-            layoutNrp.setError("NRP harus berupa 10 digit angka!");
+            inputLayout.setError("NRP harus berupa 10 digit angka!");
             return false;
         } else {
-            layoutNrp.setError(null);
+            inputLayout.setError(null);
             return true;
         }
     }
 
     private boolean validateAllFields() {
-        boolean isValid = validateNrp();
+        boolean isValid = validateNrp(nrp, layoutNrp);
 
         String strNama = nama.getText().toString().trim();
         if (strNama.isEmpty()) {
@@ -154,6 +167,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearErrors() {
+        layoutSearchNrp.setError(null);
         layoutNrp.setError(null);
         layoutNama.setError(null);
         layoutJurusan.setError(null);
@@ -162,14 +176,61 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearForm() {
+        edtSearchNrp.setText("");
         nrp.setText("");
         nama.setText("");
         jurusan.setText("");
         fakultas.setText("");
         noHp.setText("");
         clearErrors();
-        nrp.requestFocus();
+        edtSearchNrp.requestFocus();
         showToast("🧹 Form berhasil dibersihkan");
+    }
+
+    private void cari() {
+        clearErrors();
+
+        String strSearchNrp = edtSearchNrp.getText().toString().trim();
+
+        // Jika search bar kosong, coba ambil dari field nrp form
+        if (strSearchNrp.isEmpty() && !nrp.getText().toString().trim().isEmpty()) {
+            strSearchNrp = nrp.getText().toString().trim();
+            edtSearchNrp.setText(strSearchNrp);
+        }
+
+        if (!validateNrp(edtSearchNrp, layoutSearchNrp)) {
+            showToast("⚠️ Masukkan NRP 10 digit angka pada Search Bar!");
+            return;
+        }
+
+        // Simpan NRP terakhir yang dicari ke SharedPreferences
+        SharedPreferences sp = getSharedPreferences("pref_mhs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = sp.edit();
+        editor.putString("last_nrp", strSearchNrp);
+        editor.apply();
+
+        Cursor cur = dbku.rawQuery("SELECT * FROM mhs WHERE nrp = ?", new String[]{strSearchNrp});
+        if (cur.moveToFirst()) {
+            int idxNrp = cur.getColumnIndex("nrp");
+            int idxNama = cur.getColumnIndex("nama");
+            int idxJurusan = cur.getColumnIndex("jurusan");
+            int idxFakultas = cur.getColumnIndex("fakultas");
+            int idxNoHp = cur.getColumnIndex("no_hp");
+
+            // Memasukkan hasil pencarian langsung ke form
+            nrp.setText(idxNrp != -1 ? cur.getString(idxNrp) : strSearchNrp);
+            nama.setText(idxNama != -1 ? cur.getString(idxNama) : "");
+            jurusan.setText(idxJurusan != -1 ? cur.getString(idxJurusan) : "");
+            fakultas.setText(idxFakultas != -1 ? cur.getString(idxFakultas) : "");
+            noHp.setText(idxNoHp != -1 ? cur.getString(idxNoHp) : "");
+
+            layoutSearchNrp.setError(null);
+            showToast("🔍 Data Mahasiswa (" + strSearchNrp + ") Ditemukan & Dimuat ke Form");
+        } else {
+            layoutSearchNrp.setError("Data Mahasiswa tidak ditemukan!");
+            showToast("❌ Data Mahasiswa dengan NRP " + strSearchNrp + " Tidak Ditemukan");
+        }
+        cur.close();
     }
 
     private void simpan() {
@@ -204,48 +265,11 @@ public class MainActivity extends AppCompatActivity {
 
         long result = dbku.insert("mhs", null, data);
         if (result != -1) {
+            edtSearchNrp.setText(strNrp);
             showToast("✅ Data Mahasiswa (" + strNrp + ") Berhasil Disimpan");
         } else {
             showToast("❌ Gagal menyimpan data mahasiswa!");
         }
-    }
-
-    private void cari() {
-        clearErrors();
-        if (!validateNrp()) {
-            showToast("⚠️ Masukkan NRP 10 digit dengan benar untuk mencari!");
-            return;
-        }
-
-        String strNrp = nrp.getText().toString().trim();
-
-        // Simpan NRP terakhir yang dicari ke SharedPreferences
-        SharedPreferences sp = getSharedPreferences("pref_mhs", MODE_PRIVATE);
-        SharedPreferences.Editor editor = sp.edit();
-        editor.putString("last_nrp", strNrp);
-        editor.apply();
-
-        Cursor cur = dbku.rawQuery("SELECT * FROM mhs WHERE nrp = ?", new String[]{strNrp});
-        if (cur.moveToFirst()) {
-            int idxNama = cur.getColumnIndex("nama");
-            int idxJurusan = cur.getColumnIndex("jurusan");
-            int idxFakultas = cur.getColumnIndex("fakultas");
-            int idxNoHp = cur.getColumnIndex("no_hp");
-
-            nama.setText(idxNama != -1 ? cur.getString(idxNama) : "");
-            jurusan.setText(idxJurusan != -1 ? cur.getString(idxJurusan) : "");
-            fakultas.setText(idxFakultas != -1 ? cur.getString(idxFakultas) : "");
-            noHp.setText(idxNoHp != -1 ? cur.getString(idxNoHp) : "");
-
-            showToast("🔍 Data Mahasiswa (" + strNrp + ") Ditemukan");
-        } else {
-            nama.setText("");
-            jurusan.setText("");
-            fakultas.setText("");
-            noHp.setText("");
-            showToast("❌ Data Mahasiswa dengan NRP " + strNrp + " Tidak Ditemukan");
-        }
-        cur.close();
     }
 
     private void update() {
@@ -287,8 +311,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void hapus() {
         clearErrors();
-        if (!validateNrp()) {
-            showToast("⚠️ Masukkan NRP 10 digit dengan benar untuk menghapus!");
+        if (!validateNrp(nrp, layoutNrp)) {
+            showToast("⚠️ Masukkan NRP 10 digit dengan benar di form untuk menghapus!");
             return;
         }
 
